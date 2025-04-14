@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chating App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                        dark: {
+                            bg: '#181818',
+                            card: '#222222'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body class="bg-white dark:bg-dark-bg text-gray-800 dark:text-gray-200 min-h-screen">
+    <div class="container mx-auto px-4 py-6 max-w-3xl">
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold text-primary">Chating</h1>
+            <p class="text-gray-600 dark:text-gray-400">Chat with AI assistants powered by Poe</p>
+        </header>
+
+        <div class="bg-gray-50 dark:bg-dark-card rounded-lg shadow-md p-4 mb-6">
+            <div class="flex items-center mb-3">
+                <label for="botSelect" class="mr-2 font-medium">Choose a bot:</label>
+                <select id="botSelect" class="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-2 py-1 text-base">
+                    <option value="Claude-3.7-Sonnet">Claude-3.7-Sonnet</option>
+                    <option value="GPT-4o">GPT-4o</option>
+                    <option value="GPT-4o-mini">GPT-4o-mini</option>
+                    <option value="FLUX-pro-1.1">FLUX-pro-1.1 (Images)</option>
+                    <option value="ElevenLabs">ElevenLabs (Speech)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="bg-white dark:bg-dark-card rounded-lg shadow-md mb-4 overflow-hidden flex flex-col h-[60vh]">
+            <div id="messageContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div class="flex justify-center">
+                    <p class="text-gray-500 text-sm">Start a conversation by sending a message!</p>
+                </div>
+            </div>
+            
+            <div id="loadingIndicator" class="hidden px-4 py-2 bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+                <div class="flex items-center">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                    <span class="text-gray-600 dark:text-gray-400 text-sm">Getting response...</span>
+                </div>
+            </div>
+            
+            <form id="chatForm" class="border-t border-gray-200 dark:border-gray-700 p-4">
+                <div class="flex items-start">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="Type your message here..." 
+                        class="flex-1 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-lg px-4 py-2 mr-2 focus:outline-none focus:ring-2 focus:ring-primary resize-none text-base"
+                        rows="2"
+                    ></textarea>
+                    <button 
+                        type="submit" 
+                        class="bg-primary hover:bg-opacity-90 text-white px-4 py-2 rounded-lg transition"
+                    >
+                        Send
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <div id="audioContainer" class="hidden mt-4 p-4 bg-white dark:bg-dark-card rounded-lg shadow-md">
+            <h3 class="font-medium mb-2">Audio Response</h3>
+            <audio id="audioPlayer" controls class="w-full"></audio>
+        </div>
+
+        <div id="imageContainer" class="hidden mt-4 p-4 bg-white dark:bg-dark-card rounded-lg shadow-md">
+            <h3 class="font-medium mb-2">Image Response</h3>
+            <img id="imageDisplay" class="max-w-full rounded-lg" alt="Generated image">
+            <p class="text-sm text-gray-500 mt-2">Right-click and select "Save image as..." to download.</p>
+        </div>
+    </div>
+
+    <script>
+        // Check for dark mode preference
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        // DOM elements
+        const chatForm = document.getElementById('chatForm');
+        const messageInput = document.getElementById('messageInput');
+        const messageContainer = document.getElementById('messageContainer');
+        const botSelect = document.getElementById('botSelect');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const audioContainer = document.getElementById('audioContainer');
+        const audioPlayer = document.getElementById('audioPlayer');
+        const imageContainer = document.getElementById('imageContainer');
+        const imageDisplay = document.getElementById('imageDisplay');
+
+        // Auto resize textarea as user types
+        messageInput.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            
+            // Limit to 5 rows
+            const lineHeight = parseInt(getComputedStyle(this).lineHeight);
+            const maxHeight = lineHeight * 5;
+            if (this.scrollHeight > maxHeight) {
+                this.style.height = maxHeight + 'px';
+                this.style.overflowY = 'auto';
+            } else {
+                this.style.overflowY = 'hidden';
+            }
+        });
+
+        // Handler for bot responses
+        window.Poe.registerHandler("chatHandler", (result, context) => {
+            loadingIndicator.classList.add('hidden');
+            
+            result.responses.forEach(response => {
+                const existingMessageDiv = document.getElementById(`message-${response.messageId}`);
+                let messageDiv;
+                
+                if (existingMessageDiv) {
+                    messageDiv = existingMessageDiv;
+                } else {
+                    messageDiv = document.createElement('div');
+                    messageDiv.id = `message-${response.messageId}`;
+                    messageDiv.classList.add('p-3', 'rounded-lg', 'bg-gray-100', 'dark:bg-gray-800');
+                    
+                    const botNameEl = document.createElement('div');
+                    botNameEl.classList.add('font-bold', 'mb-1', 'text-primary');
+                    botNameEl.textContent = response.senderId;
+                    messageDiv.appendChild(botNameEl);
+                    
+                    const contentEl = document.createElement('div');
+                    contentEl.classList.add('prose', 'dark:prose-invert', 'max-w-none');
+                    messageDiv.appendChild(contentEl);
+                    
+                    messageContainer.appendChild(messageDiv);
+                }
+                
+                const contentEl = messageDiv.querySelector('div:nth-child(2)');
+                
+                if (response.status === "error") {
+                    contentEl.innerHTML = `<p class="text-red-500">Error: ${response.statusText || "An error occurred"}</p>`;
+                } else {
+                    // Handle markdown content
+                    contentEl.innerHTML = marked.parse(response.content);
+                    
+                    // Handle attachments if any
+                    if (response.attachments && response.attachments.length > 0) {
+                        const attachment = response.attachments[0];
+                        
+                        if (attachment.mimeType.startsWith('image/')) {
+                            // Handle image attachment
+                            imageDisplay.src = attachment.url;
+                            imageContainer.classList.remove('hidden');
+                        } else if (attachment.mimeType.startsWith('audio/')) {
+                            // Handle audio attachment
+                            audioPlayer.src = attachment.url;
+                            audioContainer.classList.remove('hidden');
+                        }
+                    }
+                }
+                
+                // Scroll to the bottom
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            });
+        });
+
+        // Submit handler
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            // Selected bot
+            const selectedBot = botSelect.value;
+            
+            // Add user message to the chat
+            const userMessageDiv = document.createElement('div');
+            userMessageDiv.classList.add('p-3', 'rounded-lg', 'bg-primary', 'bg-opacity-10', 'ml-auto', 'max-w-[80%]');
+            
+            const userNameEl = document.createElement('div');
+            userNameEl.classList.add('font-bold', 'mb-1');
+            userNameEl.textContent = 'You';
+            userMessageDiv.appendChild(userNameEl);
+            
+            const userContentEl = document.createElement('div');
+            userContentEl.textContent = message;
+            userMessageDiv.appendChild(userContentEl);
+            
+            messageContainer.appendChild(userMessageDiv);
+            
+            // Clear the input
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            
+            // Scroll to the bottom
+            messageContainer.scrollTop = messageContainer.scrollHeight;
+            
+            // Show loading indicator
+            loadingIndicator.classList.remove('hidden');
+            
+            // Hide any previous media containers
+            audioContainer.classList.add('hidden');
+            imageContainer.classList.add('hidden');
+            
+            try {
+                // Determine if we should stream based on the bot type
+                const shouldStream = !selectedBot.includes('FLUX') && 
+                                     !selectedBot.includes('Runway') && 
+                                     !selectedBot.includes('ElevenLabs');
+                
+                // Send the message to the selected bot
+                await window.Poe.sendUserMessage(`@${selectedBot} ${message}`, {
+                    handler: "chatHandler",
+                    stream: shouldStream,
+                    openChat: false
+                });
+            } catch (err) {
+                loadingIndicator.classList.add('hidden');
+                
+                // Show error message
+                const errorDiv = document.createElement('div');
+                errorDiv.classList.add('p-3', 'rounded-lg', 'bg-red-100', 'dark:bg-red-900', 'text-red-700', 'dark:text-red-200');
+                errorDiv.textContent = `Error: ${err.message || "Failed to send message"}`;
+                messageContainer.appendChild(errorDiv);
+                
+                // Scroll to the bottom
+                messageContainer.scrollTop = messageContainer.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>
